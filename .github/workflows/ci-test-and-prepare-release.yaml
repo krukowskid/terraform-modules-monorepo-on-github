@@ -66,7 +66,7 @@ jobs:
   
   validate:
     needs: detect
-    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
+    if: ${{ needs.detect.outputs.directories != '{}' && github.event.action != 'closed' }}
     strategy:
       matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
       fail-fast: false
@@ -80,7 +80,7 @@ jobs:
 
   lint:
     needs: detect
-    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
+    if: ${{ needs.detect.outputs.directories != '{}' && github.event.action != 'closed' }}
     strategy:
       matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
       fail-fast: false
@@ -93,7 +93,7 @@ jobs:
 
   analysis:
     needs: detect
-    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
+    if: ${{ needs.detect.outputs.directories != '{}' && github.event.action != 'closed' }}
     strategy:
       matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
       fail-fast: false
@@ -118,7 +118,7 @@ jobs:
           
   comment:
     needs: [detect, plan]
-    if: needs.detect.outputs.is-merge-event == 'false'
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     name: 'Comment on PR'
     steps:
