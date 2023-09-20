@@ -35,7 +35,6 @@ resource "azurerm_app_configuration" "this" {
       identity_client_id       = encryption.value.identity_client_id
     }
   }
-
   tags = local.common_tags
 }
 
