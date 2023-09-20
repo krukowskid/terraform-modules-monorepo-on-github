@@ -63,164 +63,59 @@ jobs:
             return {
               include: directories.map(directory => ({ directory })),
             };
-
-  checks:
-    needs: [detect]
-    if: needs.detect.outputs.is-merge-event == 'false'
-    uses: ./.github/workflows/reusable-checks.yml
-    secrets:
-      appId: ${{ secrets.appId }}
-      appPrivateKey: ${{ secrets.appPrivateKey }}
-      githubToken: ${{ github.token }}
-                   
-  plan:
+  
+  validate:
     needs: detect
-    if: ${{ needs.detect.outputs.directories != '{}' }}
-    runs-on: ubuntu-latest
+    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
     strategy:
       matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
       fail-fast: false
-    name: 'Module: ${{ matrix.directory }}'
-    steps:
-      - name: Label PR with module name
-        uses: actions/github-script@v6
-        if: ${{ github.event_name == 'pull_request' }}
-        id: label
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ["${{ matrix.directory }}"]
-            })
+    uses: ./.github/workflows/reusable-validate.yaml
+    with:
+      terraformVersion: '1.3.4'
+      moduleRootDirectory: ${{ matrix.directory }}
+    secrets:
+      appId: ${{ secrets.appId }}
+      appPrivateKey: ${{ secrets.appPrivateKey }}
 
-      - name: Detect previous version number
-        uses: actions/github-script@v6
-        id: prev-version
-        env:
-          PACKAGE_NAME: '${{ matrix.directory }}'
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const query = `query($owner: String!, $repo: String!, $refPrefix: String!) {
-              repository(owner: $owner, name: $repo) {
-                refs(refPrefix: $refPrefix, first: 1, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
-                  edges { node { name } }
-                }
-              }
-            }`;
-            const result = await github.graphql(query, { owner, repo,
-              refPrefix: `refs/tags/${process.env.PACKAGE_NAME}/`,
-            });
-            const prevNode = result.repository.refs.edges[0];
-            const prevVer = prevNode ? prevNode.node.name.substring(1) : '0.0.0';
-            console.log('Found previous version', prevVer);
-            return prevVer;
-          result-encoding: string
+  lint:
+    needs: detect
+    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
+    strategy:
+      matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
+      fail-fast: false
+    uses: ./.github/workflows/reusable-lint.yaml
+    with:
+      moduleRootDirectory: ${{ matrix.directory }}
+      tflintVersion: 'v0.45.0'
+    secrets:
+      githubToken: ${{ github.token }}
 
-      - name: Determine new version number
-        uses: actions/github-script@v6
-        id: new-version
-        env:
-          PREV_VERSION: '${{ steps.prev-version.outputs.result }}'
-          RELEASE_TYPE: '${{ needs.detect.outputs.release-type }}'
-        with:
-          script: |
-            const { PREV_VERSION, RELEASE_TYPE } = process.env;
-            console.log('Previous version was', PREV_VERSION);
-            console.log('Release type is', RELEASE_TYPE);
-            const numbers = PREV_VERSION.split('.');
-            const numberIdx = ['major', 'minor', 'patch'].indexOf(RELEASE_TYPE);
-            numbers[numberIdx] = parseInt(numbers[numberIdx]) + 1;
-            for (let i = numberIdx + 1; i < numbers.length; i++) {
-              numbers[i] = 0;
-            }
-            return numbers.join('.');
-          result-encoding: string
-
-      - name: Store version numbers
-        env:
-          PR_URL: ${{github.event.pull_request.html_url}}
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-        run: |
-          mkdir output
-          echo 'v${{ steps.prev-version.outputs.result }}' > output/previous-version.txt
-          echo 'v${{ steps.new-version.outputs.result }}' > output/new-version.txt
-
-      - name: Extract changelog entry
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const { owner, repo } = context.repo;
-            const { data: prInfo } = await github.rest.pulls.get({
-              owner, repo,
-              pull_number: context.issue.number,
-            });
-            console.log('Found PR body:|');
-            console.log(prInfo.body);
-            const changelogEntry = ((prInfo.body
-              .split(/^#+ ?/m)
-              .find(x => x.startsWith('Changelog'))
-              || '').split(/^```/m)[1] || '').trim();
-            if (!changelogEntry)
-              throw `'Changelog' section not found in PR body! Please add it back.`;
-            if (changelogEntry.match(/^TODO:/m))
-              throw `'Changelog' section needs proper text, instead of 'TODO'`;
-            const { writeFile } = require('fs').promises;
-            await writeFile('output/changelog.md', `
-            * PR [#${ prInfo.number }](${ prInfo.html_url }) - ${ prInfo.title }
-            \`\`\`
-            ${changelogEntry}
-            \`\`\`
-            `.trimLeft(), { encoding: 'utf-8' })
-
-      - name: Document example 'source' line
-        run: |
-          cat > output/documentation.md <<'EOF'
-          # Module Location
-          To use this module in your Terraform, use the below source value.
-          ```hcl
-          module "${{ matrix.directory }}" {
-            source = "git::${{ github.server_url }}/${{ github.repository }}.git?ref=${{ matrix.directory }}/v${{ steps.new-version.outputs.result }}"
-            # also any inputs for the module (see below)
-          }
-          ```
-          EOF
-
-      - name: Install terraform docs
-        run: |
-          wget https://github.com/terraform-docs/terraform-docs/releases/download/v0.15.0/terraform-docs-v0.15.0-linux-amd64.tar.gz \
-            --output-document - \
-            --progress dot:mega \
-          | tar -xvz
-
-      - name: Clone repository for analysis
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          path: src
-
-      - name: Render terraform docs
-        run: |
-          echo '# Module Attributes' >> output/documentation.md
-          ./terraform-docs markdown table \
-            --output-file "$(pwd)"/output/documentation.md \
-            --sort-by required \
-            'src/${{ matrix.directory }}'
-
-      - name: Bundle up Terraform module
-        working-directory: src/${{ matrix.directory }}
-        run: zip -vr ../../output/terraform-module.zip *
-
-      - name: Upload result artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: '${{ matrix.directory }}'
-          path: output
-          retention-days: 5
-
+  analysis:
+    needs: detect
+    if: ${{ needs.detect.outputs.directories != '{}' && needs.detect.outputs.is-merge-event == 'false'}}
+    strategy:
+      matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
+      fail-fast: false
+    uses: ./.github/workflows/reusable-analysis.yaml
+    with:
+      moduleRootDirectory: ${{ matrix.directory }}
+    secrets:
+      githubToken: ${{ github.token }}
+          
+  plan:
+    needs: detect
+    if: ${{ needs.detect.outputs.directories != '{}' }}
+    strategy:
+      matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
+      fail-fast: false
+    uses: ./.github/workflows/reusable-plan.yaml
+    with:
+      moduleRootDirectory: ${{ matrix.directory }}
+      releaseType: ${{ needs.detect.outputs.release-type }}
+    secrets:
+      githubToken: ${{ github.token }}
+          
   comment:
     needs: [detect, plan]
     if: needs.detect.outputs.is-merge-event == 'false'
