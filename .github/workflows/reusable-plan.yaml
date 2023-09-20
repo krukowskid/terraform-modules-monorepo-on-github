@@ -26,9 +26,6 @@ on:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ inputs.moduleRootDirectory }}
     name: 'Module: ${{ inputs.moduleRootDirectory }}'
     steps:
       - name: Label PR with module name
