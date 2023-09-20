@@ -1,0 +1,325 @@
+name: 'CI/Release'
+concurrency: 
+  group: ${{ github.head_ref }}
+  cancel-in-progress: true
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  pull_request_target:
+    types: [closed]
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    name: 'Detect pull request context'
+    outputs:
+      directories: ${{ steps.condense.outputs.result }}
+      release-type: ${{ steps.check_pr_label.outputs.release-type}}
+      is-merge-event: >-
+        ${{ github.event_name == 'pull_request_target'
+         && github.event.action == 'closed'
+         && github.event.pull_request.merged == true }}
+    steps:
+      - name: Check PR labels
+        id: check_pr_label
+        env:
+          PR_URL: ${{github.event.pull_request.html_url}}
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          LABELS=$(gh pr view $PR_URL --json labels  --jq '.labels[]| select((.name=="minor") or (.name=="major") or (.name=="patch") or (.name=="no-release")) |.name')
+          NUMBER_OF_LABELS=$(echo "$LABELS" |wc -w)
+          if [ "$NUMBER_OF_LABELS" -eq "1" ] ; then
+            echo "Found: $LABELS"
+            echo "release-type=$LABELS" >> $GITHUB_OUTPUT
+          elif [ "$NUMBER_OF_LABELS" -gt "1" ] ; then
+            echo "::error ::Too many release type labels: $( echo $LABELS | tr '\n' ' ' )"
+            exit 1
+          else
+            echo "::error ::No release type labels found(patch/minor/major/no-release)"
+            exit 2
+          fi
+
+      - name: Get changed files
+        uses: Ana06/get-changed-files@v2.2.0
+        id: raw-files
+        with:
+          format: 'json'
+
+      - name: Condense to directory list
+        uses: actions/github-script@v6
+        id: condense
+        env:
+          RAW_FILES: '${{ steps.raw-files.outputs.all }}'
+        with:
+          script: |
+            const raw = JSON.parse(process.env.RAW_FILES);
+            const directories = Array.from(new Set(raw
+              .filter(x => !x.startsWith('.'))
+              .filter(x => x.includes('/'))
+              .map(x => x.split('/')[0])
+            ));
+            if (directories.length < 1) return {};
+            return {
+              include: directories.map(directory => ({ directory })),
+            };
+
+  checks:
+    needs: [detect]
+    if: needs.detect.outputs.is-merge-event == 'false'
+    uses: ./.github/workflows/reusable-checks.yml
+    secrets:
+      appId: ${{ secrets.appId }}
+      appPrivateKey: ${{ secrets.appPrivateKey }}
+      githubToken: ${{ github.token }}
+                   
+  plan:
+    needs: detect
+    if: ${{ needs.detect.outputs.directories != '{}' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
+      fail-fast: false
+    name: 'Module: ${{ matrix.directory }}'
+    steps:
+      - name: Label PR with module name
+        uses: actions/github-script@v6
+        if: ${{ github.event_name == 'pull_request' }}
+        id: label
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.addLabels({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: ["${{ matrix.directory }}"]
+            })
+
+      - name: Detect previous version number
+        uses: actions/github-script@v6
+        id: prev-version
+        env:
+          PACKAGE_NAME: '${{ matrix.directory }}'
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const query = `query($owner: String!, $repo: String!, $refPrefix: String!) {
+              repository(owner: $owner, name: $repo) {
+                refs(refPrefix: $refPrefix, first: 1, orderBy: {field: TAG_COMMIT_DATE, direction: DESC}) {
+                  edges { node { name } }
+                }
+              }
+            }`;
+            const result = await github.graphql(query, { owner, repo,
+              refPrefix: `refs/tags/${process.env.PACKAGE_NAME}/`,
+            });
+            const prevNode = result.repository.refs.edges[0];
+            const prevVer = prevNode ? prevNode.node.name.substring(1) : '0.0.0';
+            console.log('Found previous version', prevVer);
+            return prevVer;
+          result-encoding: string
+
+      - name: Determine new version number
+        uses: actions/github-script@v6
+        id: new-version
+        env:
+          PREV_VERSION: '${{ steps.prev-version.outputs.result }}'
+          RELEASE_TYPE: '${{ needs.detect.outputs.release-type }}'
+        with:
+          script: |
+            const { PREV_VERSION, RELEASE_TYPE } = process.env;
+            console.log('Previous version was', PREV_VERSION);
+            console.log('Release type is', RELEASE_TYPE);
+            const numbers = PREV_VERSION.split('.');
+            const numberIdx = ['major', 'minor', 'patch'].indexOf(RELEASE_TYPE);
+            numbers[numberIdx] = parseInt(numbers[numberIdx]) + 1;
+            for (let i = numberIdx + 1; i < numbers.length; i++) {
+              numbers[i] = 0;
+            }
+            return numbers.join('.');
+          result-encoding: string
+
+      - name: Store version numbers
+        env:
+          PR_URL: ${{github.event.pull_request.html_url}}
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+        run: |
+          mkdir output
+          echo 'v${{ steps.prev-version.outputs.result }}' > output/previous-version.txt
+          echo 'v${{ steps.new-version.outputs.result }}' > output/new-version.txt
+
+      - name: Extract changelog entry
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { data: prInfo } = await github.rest.pulls.get({
+              owner, repo,
+              pull_number: context.issue.number,
+            });
+            console.log('Found PR body:|');
+            console.log(prInfo.body);
+            const changelogEntry = ((prInfo.body
+              .split(/^#+ ?/m)
+              .find(x => x.startsWith('Changelog'))
+              || '').split(/^```/m)[1] || '').trim();
+            if (!changelogEntry)
+              throw `'Changelog' section not found in PR body! Please add it back.`;
+            if (changelogEntry.match(/^TODO:/m))
+              throw `'Changelog' section needs proper text, instead of 'TODO'`;
+            const { writeFile } = require('fs').promises;
+            await writeFile('output/changelog.md', `
+            * PR [#${ prInfo.number }](${ prInfo.html_url }) - ${ prInfo.title }
+            \`\`\`
+            ${changelogEntry}
+            \`\`\`
+            `.trimLeft(), { encoding: 'utf-8' })
+
+      - name: Document example 'source' line
+        run: |
+          cat > output/documentation.md <<'EOF'
+          # Module Location
+          To use this module in your Terraform, use the below source value.
+          ```hcl
+          module "${{ matrix.directory }}" {
+            source = "git::${{ github.server_url }}/${{ github.repository }}.git?ref=${{ matrix.directory }}/v${{ steps.new-version.outputs.result }}"
+            # also any inputs for the module (see below)
+          }
+          ```
+          EOF
+
+      - name: Install terraform docs
+        run: |
+          wget https://github.com/terraform-docs/terraform-docs/releases/download/v0.15.0/terraform-docs-v0.15.0-linux-amd64.tar.gz \
+            --output-document - \
+            --progress dot:mega \
+          | tar -xvz
+
+      - name: Clone repository for analysis
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.sha }}
+          path: src
+
+      - name: Render terraform docs
+        run: |
+          echo '# Module Attributes' >> output/documentation.md
+          ./terraform-docs markdown table \
+            --output-file "$(pwd)"/output/documentation.md \
+            --sort-by required \
+            'src/${{ matrix.directory }}'
+
+      - name: Bundle up Terraform module
+        working-directory: src/${{ matrix.directory }}
+        run: zip -vr ../../output/terraform-module.zip *
+
+      - name: Upload result artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: '${{ matrix.directory }}'
+          path: output
+          retention-days: 5
+
+  comment:
+    needs: [detect, plan]
+    if: needs.detect.outputs.is-merge-event == 'false'
+    runs-on: ubuntu-latest
+    name: 'Comment on PR'
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: outputs
+
+      - name: Display structure of downloaded files
+        run: ls -R
+        working-directory: outputs
+
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const { number: issue_number } = context.issue;
+            const { readdir, readFile } = require('fs').promises;
+            const utf8 = { encoding: 'utf-8' };
+            const lines = [
+              '# Release plan', '',
+              '| Directory | Previous version | New version |',
+              '|--|--|--|',
+            ];
+            const sections = [];
+            for (const folder of await readdir('outputs', { withFileTypes: true })) {
+              if (!folder.isDirectory()) continue;
+              const readText = (name) => readFile(name, utf8).then(x => x.trim());
+              lines.push('| '+[
+                `\`${folder.name}\``,
+                `${await readText(`outputs/${folder.name}/previous-version.txt`)}`,
+                `**${await readText(`outputs/${folder.name}/new-version.txt`)}**`,
+              ].join(' | ')+' |');
+              sections.push(`<details><summary>Changelog preview: ${folder.name}</summary>\n\n${await readText(`outputs/${folder.name}/changelog.md`)}\n</details>`);
+            }
+            const finalBody = [lines.join('\n'), ...sections].join('\n\n');
+            const {data: allComments} = await github.rest.issues.listComments({ issue_number, owner, repo });
+            const ourComments = allComments
+              .filter(comment => comment.user.login === 'github-actions[bot]')
+              .filter(comment => comment.body.startsWith(lines[0]+'\n'));
+            const latestComment = ourComments.slice(-1)[0];
+            if (latestComment && latestComment.body === finalBody) {
+              console.log('Existing comment is already up to date.');
+              return;
+            }
+            const {data: newComment} = await github.rest.issues.createComment({ issue_number, owner, repo, body: finalBody });
+            console.log('Posted comment', newComment.id, '@', newComment.html_url);
+            // Delete all our previous comments
+            for (const comment of ourComments) {
+              if (comment.id === newComment.id) continue;
+              console.log('Deleting previous PR comment from', comment.created_at);
+              await github.rest.issues.deleteComment({ comment_id: comment.id, owner, repo });
+            }
+
+  trigger-release:
+    needs: [detect, plan]
+    if: needs.detect.outputs.is-merge-event == 'true'
+    runs-on: ubuntu-latest
+    name: 'Dispatch release event'
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          path: outputs
+
+      - name: Combine version information
+        id: extract-releases
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { readdir, readFile } = require('fs').promises;
+            const utf8 = { encoding: 'utf-8' };
+            const readText = (name) => readFile(name, utf8).then(x => x.trim());
+            const directories = await readdir('outputs', { withFileTypes: true });
+            return await Promise.all(directories
+              .filter(x => x.isDirectory())
+              .map(async folder => ({
+                module: folder.name,
+                prevVersion: await readText(`outputs/${folder.name}/previous-version.txt`),
+                newVersion: await readText(`outputs/${folder.name}/new-version.txt`),
+              })));
+              
+      - name: Dispatch monorepo_release event
+        uses: actions/github-script@v6
+        env:
+          RELEASE_LIST: '${{ steps.extract-releases.outputs.result }}'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const payload = {
+              run_id: "${{ github.run_id }}",
+              sha: context.sha,
+              releases: JSON.parse(process.env.RELEASE_LIST),
+            };
+            console.log('Event payload:', JSON.stringify(payload, null, 2));
+            const { owner, repo } = context.repo;
+            await github.rest.repos.createDispatchEvent({
+              owner, repo,
+              event_type: 'monorepo_release',
+              client_payload: payload,
+            });
