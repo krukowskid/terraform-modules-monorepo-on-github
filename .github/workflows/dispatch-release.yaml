@@ -1,4 +1,4 @@
-name: 'Release new versions'
+name: 'dispatch/Release new versions'
 on:
   repository_dispatch:
     types: [monorepo_release]
@@ -11,7 +11,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       - name: tag changes
         env:
