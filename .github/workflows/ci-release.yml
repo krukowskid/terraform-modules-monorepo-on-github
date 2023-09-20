@@ -197,7 +197,7 @@ jobs:
           | tar -xvz
 
       - name: Clone repository for analysis
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           path: src
