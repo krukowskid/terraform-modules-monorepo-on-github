@@ -1,2 +1,2 @@
 # terraform-modules-monorepo
-Terraform modules monorepo example
+Reusable Terraform modules that you can include in your infrastructure template! :tada:
