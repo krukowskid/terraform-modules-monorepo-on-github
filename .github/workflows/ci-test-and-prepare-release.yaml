@@ -1,4 +1,4 @@
-name: 'CI/Release'
+name: 'CI/test and prepare release'
 concurrency: 
   group: ${{ github.head_ref }}
   cancel-in-progress: true
@@ -25,7 +25,7 @@ jobs:
         id: check_pr_label
         env:
           PR_URL: ${{github.event.pull_request.html_url}}
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LABELS=$(gh pr view $PR_URL --json labels  --jq '.labels[]| select((.name=="minor") or (.name=="major") or (.name=="patch") or (.name=="no-release")) |.name')
           NUMBER_OF_LABELS=$(echo "$LABELS" |wc -w)
@@ -89,7 +89,7 @@ jobs:
       moduleRootDirectory: ${{ matrix.directory }}
       tflintVersion: 'v0.45.0'
     secrets:
-      githubToken: ${{ github.token }}
+      githubToken: ${{ secrets.GITHUB_TOKEN }}
 
   analysis:
     needs: detect
@@ -101,7 +101,7 @@ jobs:
     with:
       moduleRootDirectory: ${{ matrix.directory }}
     secrets:
-      githubToken: ${{ github.token }}
+      githubToken: ${{ secrets.GITHUB_TOKEN }}
           
   plan:
     needs: detect
@@ -114,7 +114,7 @@ jobs:
       moduleRootDirectory: ${{ matrix.directory }}
       releaseType: ${{ needs.detect.outputs.release-type }}
     secrets:
-      githubToken: ${{ github.token }}
+      githubToken: ${{ secrets.GITHUB_TOKEN }}
           
   comment:
     needs: [detect, plan]
