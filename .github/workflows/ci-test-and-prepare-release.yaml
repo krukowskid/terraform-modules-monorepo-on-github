@@ -105,7 +105,7 @@ jobs:
           
   plan:
     needs: detect
-    if: ${{ needs.detect.outputs.directories != '{}' }}
+    if: ${{ needs.detect.outputs.directories != '{}' && ( needs.detect.outputs.is-merge-event == 'true' || github.event.action != 'closed' )}}
     strategy:
       matrix: "${{ fromJson(needs.detect.outputs.directories) }}"
       fail-fast: false
