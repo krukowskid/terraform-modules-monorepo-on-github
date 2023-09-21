@@ -1,7 +1,6 @@
-#checkov:skip=CKV_TF_1:Risk accepted
 module "azure_region" {
   source  = "claranet/regions/azurerm"
-  version = "6.1.0"
+  version = "6.1.0" #checkov:skip=CKV_TF_1:Risk accepted
 
   azure_region = "eu-west"
 }
