@@ -22,7 +22,7 @@ resource "azurecaf_name" "this" {
 
 resource "azurerm_app_configuration" "this" {
   count               = local.create_app_configuration
-  name                = format("%s-%02s", azurecaf_name.app_configuration[0].results["azurerm_app_configuration"], var.environment.number)
+  name                = format("%s-%02s", azurecaf_name.this[0].results["azurerm_app_configuration"], var.environment.number)
   resource_group_name = var.resource_group_name
   location            = data.azurerm_resource_group.this.location
 
