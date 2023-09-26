@@ -25,7 +25,7 @@ jobs:
         working-directory: ${{ inputs.moduleRootDirectory }}
     steps:
       - name: Install TFLint
-        uses: terraform-linters/setup-tflint@v3
+        uses: terraform-linters/setup-tflint@v4
         with:
           tflint_version: ${{ inputs.tflintVersion }}
           github_token: ${{ secrets.githubToken }}
