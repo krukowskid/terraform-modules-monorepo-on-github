@@ -9,7 +9,7 @@ jobs:
     name: 'Update Wiki'
     steps:
 
-      - uses: dawidd6/action-download-artifact@v2
+      - uses: dawidd6/action-download-artifact@v3
         with:
           workflow: unused
           run_id: ${{ github.event.client_payload.run_id }}
