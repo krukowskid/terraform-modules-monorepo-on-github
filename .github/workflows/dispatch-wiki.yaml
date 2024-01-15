@@ -9,7 +9,7 @@ jobs:
     name: 'Update Wiki'
     steps:
 
-      - uses: dawidd6/action-download-artifact@v2
+      - uses: dawidd6/action-download-artifact@v3
         with:
           workflow: unused
           run_id: ${{ github.event.client_payload.run_id }}
@@ -27,7 +27,7 @@ jobs:
       - name: Display structure of retrieved files
         run: ls -R
 
-      - uses: actions/github-script@v6
+      - uses: actions/github-script@v7
         id: write-changes
         with:
           script: |
