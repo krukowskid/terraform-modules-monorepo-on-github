@@ -1,4 +1,4 @@
-name: 'dispatch/Update wiki'
+name: "dispatch/Update wiki"
 on:
   repository_dispatch:
     types: [monorepo_release]
@@ -6,13 +6,12 @@ on:
 jobs:
   update-wiki:
     runs-on: ubuntu-latest
-    name: 'Update Wiki'
+    name: "Update Wiki"
     steps:
-
-      - uses: dawidd6/action-download-artifact@v3
+      - uses: actions/download-artifact@v4.1.2
         with:
-          workflow: unused
-          run_id: ${{ github.event.client_payload.run_id }}
+          run-id: ${{ github.event.client_payload.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: outputs
 
       - name: Checkout wiki
