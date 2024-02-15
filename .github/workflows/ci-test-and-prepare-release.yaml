@@ -40,17 +40,18 @@ jobs:
             exit 2
           fi
 
-      - name: Get changed files
-        uses: Ana06/get-changed-files@v2.2.0
+      - name: Get all changed files
         id: raw-files
+        uses: tj-actions/changed-files@v42.0.2
         with:
-          format: 'json'
+          json: true
+          escape_json: false
 
       - name: Condense to directory list
         uses: actions/github-script@v7
         id: condense
         env:
-          RAW_FILES: '${{ steps.raw-files.outputs.all }}'
+          RAW_FILES: '${{ steps.raw-files.outputs.all_modified_files }}'
         with:
           script: |
             const raw = JSON.parse(process.env.RAW_FILES);
