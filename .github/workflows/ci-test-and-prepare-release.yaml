@@ -47,6 +47,8 @@ jobs:
           json: true
           escape_json: false
 
+      - uses: actions/checkout@v4.2.0
+
       - name: Condense to directory list
         uses: actions/github-script@v7
         id: condense
@@ -54,17 +56,19 @@ jobs:
           RAW_FILES: '${{ steps.raw-files.outputs.all_modified_files }}'
         with:
           script: |
+            const fs = require('fs');
             const raw = JSON.parse(process.env.RAW_FILES);
             const directories = Array.from(new Set(raw
               .filter(x => !x.startsWith('.'))
               .filter(x => x.includes('/'))
               .map(x => x.split('/')[0])
-            ));
+              .filter(x => fs.existsSync(x))
+              ));
             if (directories.length < 1) return {};
             return {
               include: directories.map(directory => ({ directory })),
             };
-  
+
   validate:
     needs: detect
     if: ${{ needs.detect.outputs.directories != '{}' && github.event.action != 'closed' }}
