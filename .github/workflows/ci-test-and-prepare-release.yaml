@@ -42,7 +42,7 @@ jobs:
 
       - name: Get all changed files
         id: raw-files
-        uses: tj-actions/changed-files@v46.0.3
+        uses: tj-actions/changed-files@v46.0.4
         with:
           json: true
           escape_json: false
