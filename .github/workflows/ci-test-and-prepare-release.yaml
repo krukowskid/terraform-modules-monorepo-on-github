@@ -47,7 +47,7 @@ jobs:
           json: true
           escape_json: false
 
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v5
 
       - name: Condense to directory list
         uses: actions/github-script@v7
