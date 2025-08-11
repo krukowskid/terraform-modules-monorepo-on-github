@@ -20,7 +20,7 @@ jobs:
         working-directory: ${{ inputs.moduleRootDirectory }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Scan module with checkov
         uses: bridgecrewio/checkov-action@v12
@@ -37,7 +37,7 @@ jobs:
         working-directory: ${{ inputs.moduleRootDirectory }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Scan module with tfsec
         uses: aquasecurity/tfsec-action@v1.0.3
