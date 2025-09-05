@@ -26,7 +26,7 @@ jobs:
       - name: Display structure of retrieved files
         run: ls -R
 
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         id: write-changes
         with:
           script: |
